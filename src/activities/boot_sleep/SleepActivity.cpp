@@ -171,13 +171,29 @@ int pngOverlayDraw(PNGDRAW* pDraw) {
           }
           break;
         }
-        case PNG_PIXEL_GRAYSCALE:
-          gray = pixels[srcX];
+        case PNG_PIXEL_GRAYSCALE: {
+          // PNGdec delivers grayscale scanlines at the source bit depth, packed MSB-first.
+          // 8-bit grayscale is one byte per pixel; 1/2/4-bit grayscale packs 8/4/2 pixels
+          // per byte and must be unpacked. TRMNL serves 2-bit grayscale, which the old
+          // 8-bit-only read (pixels[srcX]) sheared horizontally by ~4x. For plain
+          // grayscale, iBpp equals the PNG bit depth.
+          const int bpp = pDraw->iBpp;
+          if (bpp >= 8) {
+            gray = pixels[srcX];
+          } else {
+            const int ppb = 8 / bpp;                          // pixels per byte
+            const int mask = (1 << bpp) - 1;                  // sample max value
+            const uint8_t byte = pixels[srcX / ppb];
+            const int shift = (ppb - 1 - (srcX % ppb)) * bpp;  // MSB-first within the byte
+            const int sample = (byte >> shift) & mask;
+            gray = static_cast<uint8_t>(sample * 255 / mask);  // scale sample to 0..255
+          }
           // tRNS color-key: transparent gray value stored in low byte
           if (ctx->transparentColor >= 0 && gray == (uint8_t)(ctx->transparentColor & 0xFF)) {
             alpha = 0;
           }
           break;
+        }
         case PNG_PIXEL_INDEXED:
           if (pDraw->pPalette) {
             const uint8_t idx = pixels[srcX];

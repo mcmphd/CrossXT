@@ -106,10 +106,25 @@ int requiredPngInternalBufferBytes(int srcWidth, int pixelType) {
 // Convert entire source line to grayscale with alpha blending to white background.
 // For indexed PNGs with tRNS chunk, alpha values are stored at palette[768] onwards.
 // Processing the whole line at once improves cache locality and reduces per-pixel overhead.
-void convertLineToGray(uint8_t* pPixels, uint8_t* grayLine, int width, int pixelType, uint8_t* palette, int hasAlpha) {
+void convertLineToGray(uint8_t* pPixels, uint8_t* grayLine, int width, int pixelType, uint8_t* palette, int hasAlpha,
+                       int bpp) {
   switch (pixelType) {
     case PNG_PIXEL_GRAYSCALE:
-      memcpy(grayLine, pPixels, width);
+      if (bpp >= 8) {
+        memcpy(grayLine, pPixels, width);
+      } else {
+        // 1/2/4-bit grayscale is packed MSB-first (8/4/2 pixels per byte); unpack each
+        // sample and scale it to 0..255. The old straight memcpy assumed 8-bit and
+        // sheared sub-8-bit images horizontally.
+        const int ppb = 8 / bpp;
+        const int mask = (1 << bpp) - 1;
+        for (int x = 0; x < width; x++) {
+          const uint8_t byte = pPixels[x / ppb];
+          const int shift = (ppb - 1 - (x % ppb)) * bpp;
+          const int sample = (byte >> shift) & mask;
+          grayLine[x] = (uint8_t)(sample * 255 / mask);
+        }
+      }
       break;
 
     case PNG_PIXEL_TRUECOLOR:
@@ -185,7 +200,7 @@ int pngDrawCallback(PNGDRAW* pDraw) {
 
   // Convert entire source line to grayscale (improves cache locality)
   convertLineToGray(pDraw->pPixels, ctx->grayLineBuffer, srcWidth, pDraw->iPixelType, pDraw->pPalette,
-                    pDraw->iHasAlpha);
+                    pDraw->iHasAlpha, pDraw->iBpp);
 
   // Render scaled row using Bresenham-style integer stepping (no floating-point division)
   int dstWidth = ctx->dstWidth;
