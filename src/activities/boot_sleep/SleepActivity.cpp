@@ -678,8 +678,12 @@ void SleepActivity::renderTrmnlSleepScreen() const {
   renderer.setOrientation(trmnlOrientation == trmnl::Orientation::Portrait
                               ? GfxRenderer::Orientation::Portrait
                               : GfxRenderer::Orientation::LandscapeCounterClockwise);
-  const TrmnlSleepClient::Config config{SETTINGS.trmnlServerUrl, SETTINGS.trmnlApiKey, SETTINGS.trmnlDeviceId,
-                                        trmnl::displaySizeFor(trmnlOrientation), trmnl::modelFor(trmnlOrientation)};
+  const TrmnlSleepClient::Config config{SETTINGS.trmnlServerUrl,
+                                        SETTINGS.trmnlApiKey,
+                                        SETTINGS.trmnlDeviceId,
+                                        trmnl::displaySizeFor(trmnlOrientation),
+                                        trmnl::modelFor(trmnlOrientation),
+                                        SETTINGS.trmnlExtendedWifiTimeout != 0};
   TrmnlSleepClient::fetchLatest(config);
   if (!renderTrmnlCachedImage()) {
     renderDefaultSleepScreen();

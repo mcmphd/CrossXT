@@ -47,13 +47,16 @@ bool TrmnlSleepClient::hasConfig(const Config& config) {
   return config.serverUrl && config.serverUrl[0] != '\0' && config.apiKey && config.apiKey[0] != '\0';
 }
 
-bool TrmnlSleepClient::connectWifi() {
+bool TrmnlSleepClient::connectWifi(const bool extendedTimeout) {
   const auto* cred = getTrmnlWifiCredential();
   if (!cred || cred->ssid.empty()) {
     return false;
   }
 
-  LOG_INF("TRM", "Connecting to WiFi: %s", cred->ssid.c_str());
+  const uint8_t maxRetries = extendedTimeout ? WIFI_RETRIES_EXTENDED : WIFI_RETRIES_DEFAULT;
+
+  LOG_INF("TRM", "Connecting to WiFi: %s (timeout=%ums)", cred->ssid.c_str(),
+          static_cast<unsigned>(maxRetries) * WIFI_RETRY_DELAY_MS);
   WiFi.persistent(false);
   WiFi.mode(WIFI_STA);
   WiFi.disconnect(true, true);
@@ -62,7 +65,7 @@ bool TrmnlSleepClient::connectWifi() {
   WiFi.begin(cred->ssid.c_str(), cred->password.c_str());
 
   uint8_t attempt = 0;
-  while (attempt < WIFI_RETRIES) {
+  while (attempt < maxRetries) {
     delay(WIFI_RETRY_DELAY_MS);
     if (WiFi.status() == WL_CONNECTED && WiFi.localIP() != IPAddress(0, 0, 0, 0)) {
       LOG_INF("TRM", "WiFi connected after %d attempts", attempt + 1);
@@ -72,7 +75,7 @@ bool TrmnlSleepClient::connectWifi() {
     attempt++;
   }
 
-  LOG_ERR("TRM", "Wi-Fi connect failed after %d attempts", WIFI_RETRIES);
+  LOG_ERR("TRM", "Wi-Fi connect failed after %d attempts", maxRetries);
   return false;
 }
 
@@ -155,7 +158,7 @@ bool TrmnlSleepClient::fetchLatest(const Config& config) {
 
   LOG_INF("TRM", "Fetching latest TRMNL image from %s", config.serverUrl);
   Storage.mkdir("/.crosspoint");
-  if (!connectWifi()) {
+  if (!connectWifi(config.extendedWifiTimeout)) {
     LOG_ERR("TRM", "Failed to connect WiFi for TRMNL fetch");
     disconnectWifi();
     return false;

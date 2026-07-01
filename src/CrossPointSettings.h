@@ -393,6 +393,10 @@ class CrossPointSettings {
   char trmnlApiKey[128] = "";
   char trmnlDeviceId[32] = "";
   uint8_t trmnlOrientation = TRMNL_LANDSCAPE;
+  // Widens the post-wake Wi-Fi connect window for the TRMNL fetch from 10s to 20s.
+  // Off by default; enable on networks where a cold-wake association/handshake
+  // routinely needs more than 10s (e.g. WPA2/WPA3 mixed-mode APs).
+  uint8_t trmnlExtendedWifiTimeout = 0;
   // Hide battery percentage
   uint8_t hideBatteryPercentage = HIDE_NEVER;
   // Long-press page turn button behavior

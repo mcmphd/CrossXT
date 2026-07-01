@@ -16,6 +16,10 @@ class TrmnlSleepClient {
     const char* deviceId;
     trmnl::DisplaySize displaySize;
     const char* model;
+    // When true, allows a longer post-wake Wi-Fi connect window (see
+    // WIFI_RETRIES_EXTENDED) for networks where a cold-wake association or
+    // WPA handshake routinely takes longer than the default budget.
+    bool extendedWifiTimeout = false;
   };
 
   static constexpr const char* CACHE_BMP = "/.crosspoint/trmnl_sleep.bmp";
@@ -29,12 +33,13 @@ class TrmnlSleepClient {
 
  private:
   static constexpr const char* CACHE_TMP = "/.crosspoint/trmnl_sleep.tmp";
-  static constexpr uint8_t WIFI_RETRIES = 20;
+  static constexpr uint8_t WIFI_RETRIES_DEFAULT = 20;   // 20 * 500ms = 10s
+  static constexpr uint8_t WIFI_RETRIES_EXTENDED = 40;  // 40 * 500ms = 20s
   static constexpr uint16_t WIFI_RETRY_DELAY_MS = 500;
   static constexpr size_t DISPLAY_JSON_MAX_BYTES = 4096;
   static constexpr size_t IMAGE_MAX_BYTES = 256 * 1024;
 
-  static bool connectWifi();
+  static bool connectWifi(bool extendedTimeout);
   static void disconnectWifi();
   static std::string resolveDeviceId(const char* configuredDeviceId);
   static bool replaceCache(const std::string& tmpPath, ImageKind kind);
