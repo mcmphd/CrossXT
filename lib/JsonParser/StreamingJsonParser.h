@@ -18,7 +18,15 @@ struct JsonCallbacks {
 
 class StreamingJsonParser {
  public:
-  static constexpr size_t TOKEN_BUF_SIZE = 512;
+  // \uXXXX escapes are passed through as the literal 6-character source text (see
+  // onEscapedChar()'s 'u' case) rather than decoded, so a string value with several
+  // escaped ampersands (&, 6 bytes each vs. 1 for a literal '&') can be several
+  // times longer in the buffer than its logical length. TRMNL's /api/display responses
+  // measured ~486-516 bytes for image_url alone depending on whether the server escaped
+  // ampersands for that response, right at the edge of the previous 512-byte limit --
+  // silently truncating the callback (see the tokenOverflow check below) with no error.
+  // Sized with real headroom rather than tuned to one observed case.
+  static constexpr size_t TOKEN_BUF_SIZE = 1024;
   static constexpr size_t MAX_NESTING = 32;
 
   explicit StreamingJsonParser(const JsonCallbacks& callbacks);

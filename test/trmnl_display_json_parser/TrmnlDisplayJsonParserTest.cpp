@@ -1,5 +1,6 @@
 #include <cstdio>
 #include <cstring>
+#include <string>
 
 #include "lib/JsonParser/TrmnlDisplayJsonParser.h"
 #include "src/trmnl/TrmnlDisplayConfig.h"
@@ -126,6 +127,42 @@ void testMissingImageUrl() {
   PASS();
 }
 
+// Regression test for a real TRMNL /api/display response: a presigned S3 URL with
+// several &-escaped ampersands (valid JSON -- TRMNL's server was observed emitting
+// both literal '&' and & for the same field across different responses). Each
+// & is stored as 6 raw bytes by this parser (it intentionally doesn't decode
+// \uXXXX escapes -- see StreamingJsonParser's onEscapedChar()), so this 486-byte URL
+// (with literal '&') becomes 521 bytes with & substituted in -- over the old
+// 512-byte TOKEN_BUF_SIZE, which silently dropped the image_url callback with no
+// error (tokenOverflow just skips onString()). This must fit in the current buffer.
+void testHandlesLongEscapedImageUrl() {
+  printf("testHandlesLongEscapedImageUrl...\n");
+
+  const std::string url =
+      "https://trmnl.s3.us-east-2.amazonaws.com/m8b1cjzs3zidyc0lexm460vy3t5j?"
+      "response-content-disposition=inline%3B%20filename%3D%22plugin-10a5b0%22%3B%20"
+      "filename%2A%3DUTF-8%27%27plugin-10a5b0\\u0026"
+      "response-content-type=image%2Fpng\\u0026"
+      "X-Amz-Algorithm=AWS4-HMAC-SHA256\\u0026"
+      "X-Amz-Credential=AKIA47CRUQUU4VKBBMOF%2F20260701%2Fus-east-2%2Fs3%2Faws4_request\\u0026"
+      "X-Amz-Date=20260701T154633Z\\u0026"
+      "X-Amz-Expires=300\\u0026"
+      "X-Amz-SignedHeaders=host\\u0026"
+      "X-Amz-Signature=8e8f45ef38cbc565dc18b46574cafb1f8d117b513200d8c795729ef629a41545";
+  const std::string json = R"({"status":0,"image_url":")" + url +
+                           R"(","filename":"plugin-10a5b0-1782914788","refresh_rate":907})";
+
+  TrmnlDisplayJsonParser parser;
+  parser.feed(json.c_str(), json.length());
+
+  ASSERT_FALSE(parser.hasError());
+  ASSERT_TRUE(parser.foundImageUrl());
+  ASSERT_STREQ(parser.getImageUrl(), url.c_str());
+
+  printf("  passed\n");
+  PASS();
+}
+
 void testDisplaySizeForOrientation() {
   printf("testDisplaySizeForOrientation...\n");
 
@@ -147,6 +184,7 @@ int main() {
   testParsesChunkedMinifiedResponse();
   testIgnoresNestedImageUrl();
   testMissingImageUrl();
+  testHandlesLongEscapedImageUrl();
   testDisplaySizeForOrientation();
 
   printf("\n%d passed, %d failed\n", testsPassed, testsFailed);
