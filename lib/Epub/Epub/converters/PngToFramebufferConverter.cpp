@@ -6,6 +6,7 @@
 #include <Logging.h>
 #include <MemoryBudget.h>
 #include <PNGdec.h>
+#include <PngGraySample.h>
 
 #include <cstdlib>
 #include <new>
@@ -110,19 +111,18 @@ void convertLineToGray(uint8_t* pPixels, uint8_t* grayLine, int width, int pixel
                        int bpp) {
   switch (pixelType) {
     case PNG_PIXEL_GRAYSCALE:
-      if (bpp >= 8) {
+      if (bpp == 8) {
+        // Fast bulk path for the common case -- see the file-level comment above
+        // on why processing the whole line at once matters here.
         memcpy(grayLine, pPixels, width);
       } else {
-        // 1/2/4-bit grayscale is packed MSB-first (8/4/2 pixels per byte); unpack each
-        // sample and scale it to 0..255. The old straight memcpy assumed 8-bit and
-        // sheared sub-8-bit images horizontally.
-        const int ppb = 8 / bpp;
-        const int mask = (1 << bpp) - 1;
+        // Sub-8-bit grayscale is packed MSB-first (8/4/2 samples per byte); 16-bit
+        // grayscale is 2 bytes/sample, big-endian. pngUnpackGraySample() unpacks
+        // and scales any valid PNG grayscale depth; shared with SleepActivity.cpp's
+        // pngOverlayDraw() so the two PNG consumers can't drift apart. The old
+        // straight memcpy assumed 8-bit and sheared other depths horizontally.
         for (int x = 0; x < width; x++) {
-          const uint8_t byte = pPixels[x / ppb];
-          const int shift = (ppb - 1 - (x % ppb)) * bpp;
-          const int sample = (byte >> shift) & mask;
-          grayLine[x] = (uint8_t)(sample * 255 / mask);
+          grayLine[x] = pngUnpackGraySample(pPixels, x, bpp);
         }
       }
       break;
