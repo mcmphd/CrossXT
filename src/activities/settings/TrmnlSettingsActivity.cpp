@@ -12,6 +12,10 @@
 
 namespace {
 constexpr int MENU_ITEMS = 5;
+// Named so this item's wiring in handleSelection()/render() doesn't silently break if
+// items are reordered or new ones inserted before it -- the other indices (0-2) are
+// pre-existing and unchanged by this feature, left as-is to keep this change scoped.
+constexpr int MENU_INDEX_EXTENDED_WIFI_TIMEOUT = 4;
 const StrId menuNames[MENU_ITEMS] = {StrId::STR_TRMNL_SERVER_URL, StrId::STR_TRMNL_API_KEY,
                                      StrId::STR_TRMNL_DEVICE_ID, StrId::STR_TRMNL_ORIENTATION,
                                      StrId::STR_TRMNL_EXTENDED_WIFI_TIMEOUT};
@@ -93,7 +97,7 @@ void TrmnlSettingsActivity::handleSelection() {
     SETTINGS.trmnlOrientation = (SETTINGS.trmnlOrientation + 1) % CrossPointSettings::TRMNL_ORIENTATION_COUNT;
     SETTINGS.saveToFile();
     requestUpdate();
-  } else if (selectedIndex == 4) {
+  } else if (selectedIndex == MENU_INDEX_EXTENDED_WIFI_TIMEOUT) {
     SETTINGS.trmnlExtendedWifiTimeout = !SETTINGS.trmnlExtendedWifiTimeout;
     SETTINGS.saveToFile();
     requestUpdate();
@@ -119,7 +123,7 @@ void TrmnlSettingsActivity::render(RenderLock&&) {
           return SETTINGS.trmnlOrientation == CrossPointSettings::TRMNL_PORTRAIT ? std::string(tr(STR_TRMNL_VERTICAL))
                                                                                  : std::string(tr(STR_TRMNL_HORIZONTAL));
         }
-        if (index == 4) {
+        if (index == MENU_INDEX_EXTENDED_WIFI_TIMEOUT) {
           return SETTINGS.trmnlExtendedWifiTimeout ? std::string(tr(STR_STATE_ON)) : std::string(tr(STR_STATE_OFF));
         }
         return std::string(tr(STR_NOT_SET));
