@@ -196,7 +196,7 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
         uint8_t gray = row[dstX - blockX];
         uint8_t dithered;
         if (useDithering) {
-          dithered = applyBayerDither4Level(gray, outX, outY);
+          dithered = applyBlueNoiseDither4Level(gray, outX, outY);
         } else {
           dithered = gray / 85;
           if (dithered > 3) dithered = 3;
@@ -255,7 +255,7 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
 
         uint8_t dithered;
         if (useDithering) {
-          dithered = applyBayerDither4Level(gray, outX, outY);
+          dithered = applyBlueNoiseDither4Level(gray, outX, outY);
         } else {
           dithered = gray / 85;
           if (dithered > 3) dithered = 3;
@@ -278,7 +278,7 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
 
         uint8_t dithered;
         if (useDithering) {
-          dithered = applyBayerDither4Level(gray, outX, outY);
+          dithered = applyBlueNoiseDither4Level(gray, outX, outY);
         } else {
           dithered = gray / 85;
           if (dithered > 3) dithered = 3;
@@ -304,7 +304,7 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
 
         uint8_t dithered;
         if (useDithering) {
-          dithered = applyBayerDither4Level(gray, outX, outY);
+          dithered = applyBlueNoiseDither4Level(gray, outX, outY);
         } else {
           dithered = gray / 85;
           if (dithered > 3) dithered = 3;
@@ -337,7 +337,7 @@ int jpegDrawCallback(JPEGDRAW* pDraw) {
 
       uint8_t dithered;
       if (useDithering) {
-        dithered = applyBayerDither4Level(gray, outX, outY);
+        dithered = applyBlueNoiseDither4Level(gray, outX, outY);
       } else {
         dithered = gray / 85;
         if (dithered > 3) dithered = 3;
