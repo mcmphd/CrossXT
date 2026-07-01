@@ -131,7 +131,12 @@ void StreamingJsonParser::handleStringChar(char c) {
   if (unicodeDigitsRemaining > 0) {
     const int digit = hexDigitValue(c);
     if (digit < 0) {
+      // error is terminal in normal use (feed()'s loop stops on it), but reset the
+      // in-progress escape state too so the parser stays internally consistent for
+      // any caller that inspects/reuses it after an error rather than discarding it.
       error = true;
+      unicodeDigitsRemaining = 0;
+      unicodeValue = 0;
       return;
     }
     unicodeValue = static_cast<uint16_t>((unicodeValue << 4) | static_cast<uint16_t>(digit));

@@ -152,7 +152,7 @@ TEST(StreamingJsonParser, StringEscapes) {
 
 TEST(StreamingJsonParser, UnicodeEscapeBasicAscii) {
   // AB -- two BMP code points in the 1-byte-UTF-8 range -- decode to "AB".
-  auto events = parse(R"({"u": "AB"})");
+  auto events = parse(R"({"u": "\u0041\u0042"})");
 
   ASSERT_EQ(events.size(), 4u);
   EXPECT_EQ(events[2].type, EventType::STRING);
@@ -163,7 +163,7 @@ TEST(StreamingJsonParser, UnicodeEscapeAmpersand) {
   // The real-world case that motivated this: TRMNL's /api/display sometimes escapes
   // '&' as & within image_url. This must decode back to a literal '&', not the
   // 6-byte source text, or the resulting URL is unusable for the actual image request.
-  auto events = parse(R"({"u": "a&b&c"})");
+  auto events = parse(R"({"u": "a\u0026b\u0026c"})");
 
   ASSERT_EQ(events.size(), 4u);
   EXPECT_EQ(events[2].type, EventType::STRING);
@@ -172,7 +172,7 @@ TEST(StreamingJsonParser, UnicodeEscapeAmpersand) {
 
 TEST(StreamingJsonParser, UnicodeEscapeTwoByteUtf8) {
   // e-acute -- first code point requiring 2-byte UTF-8 (0xC3 0xA9).
-  auto events = parse(R"({"u": "café"})");
+  auto events = parse(R"({"u": "caf\u00E9"})");
 
   ASSERT_EQ(events.size(), 4u);
   EXPECT_EQ(events[2].type, EventType::STRING);
@@ -181,7 +181,7 @@ TEST(StreamingJsonParser, UnicodeEscapeTwoByteUtf8) {
 
 TEST(StreamingJsonParser, UnicodeEscapeThreeByteUtf8) {
   // SNOWMAN (U+2603) -- requires 3-byte UTF-8 (0xE2 0x98 0x83).
-  auto events = parse(R"({"u": "☃"})");
+  auto events = parse(R"({"u": "\u2603"})");
 
   ASSERT_EQ(events.size(), 4u);
   EXPECT_EQ(events[2].type, EventType::STRING);
@@ -192,11 +192,32 @@ TEST(StreamingJsonParser, UnicodeEscapeSurrogatePairFourByteUtf8) {
   // U+1F600 GRINNING FACE, beyond the BMP -- JSON encodes it as a UTF-16 surrogate
   // pair (😀) that must combine into a single 4-byte UTF-8 sequence
   // (0xF0 0x9F 0x98 0x80), not two separate (invalid) 3-byte sequences.
-  auto events = parse(R"({"u": "😀"})");
+  auto events = parse(R"({"u": "\uD83D\uDE00"})");
 
   ASSERT_EQ(events.size(), 4u);
   EXPECT_EQ(events[2].type, EventType::STRING);
   EXPECT_EQ(events[2].value, "\xf0\x9f\x98\x80");
+}
+
+TEST(StreamingJsonParser, UnicodeEscapeSurrogatePairSplitAcrossFeed) {
+  // Same surrogate pair as UnicodeEscapeSurrogatePairFourByteUtf8, but split so
+  // the high surrogate arrives in one feed() call and the low surrogate in the
+  // next -- pendingHighSurrogate has to survive as member state across the call
+  // boundary, not just across single characters within one call.
+  const char* highSurrogate = R"(\uD83D)";
+  const char* lowSurrogateAndClose = R"JSON(\uDE00"})JSON";
+  const char* prefix = R"({"u": ")";
+
+  TestContext ctx;
+  StreamingJsonParser parser(makeCallbacks(&ctx));
+  parser.feed(prefix, strlen(prefix));
+  parser.feed(highSurrogate, strlen(highSurrogate));
+  parser.feed(lowSurrogateAndClose, strlen(lowSurrogateAndClose));
+
+  EXPECT_FALSE(parser.hasError());
+  ASSERT_EQ(ctx.events.size(), 4u);
+  EXPECT_EQ(ctx.events[2].type, EventType::STRING);
+  EXPECT_EQ(ctx.events[2].value, "\xf0\x9f\x98\x80");
 }
 
 TEST(StreamingJsonParser, UnicodeEscapeLoneHighSurrogateIsError) {
