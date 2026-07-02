@@ -433,12 +433,13 @@ void SleepActivity::onEnter() {
 
   // Show the popup in the reader's orientation when sleep starts from an open book.
   // Reset to portrait afterwards so the sleep screen renderer keeps its existing layout.
+  const char* popupText = I18N.get(isPowerButtonRefresh ? StrId::STR_REFRESHING : StrId::STR_ENTERING_SLEEP);
   if (APP_STATE.lastSleepFromReader) {
     ReaderUtils::applyOrientation(renderer, SETTINGS.orientation);
-    GUI.drawPopup(renderer, tr(STR_ENTERING_SLEEP));
+    GUI.drawPopup(renderer, popupText);
     renderer.setOrientation(GfxRenderer::Orientation::Portrait);
   } else {
-    GUI.drawPopup(renderer, tr(STR_ENTERING_SLEEP));
+    GUI.drawPopup(renderer, popupText);
   }
 
   switch (SETTINGS.sleepScreen) {

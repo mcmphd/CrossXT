@@ -445,8 +445,10 @@ void waitForPowerRelease() {
 // screen in place, in lieu of the normal "BOOTING" splash (which this path skips).
 void showTrmnlRefreshingStatus() {
   const auto pageHeight = renderer.getScreenHeight();
+  const auto lineHeight = renderer.getTextHeight(SMALL_FONT_ID);
   renderer.clearScreen();
-  renderer.drawCenteredText(SMALL_FONT_ID, pageHeight / 2, tr(STR_REFRESHING));
+  renderer.drawCenteredText(SMALL_FONT_ID, pageHeight / 2 - lineHeight / 2, tr(STR_TRMNL_REFRESH_HINT_1));
+  renderer.drawCenteredText(SMALL_FONT_ID, pageHeight / 2 + lineHeight / 2, tr(STR_TRMNL_REFRESH_HINT_2));
   renderer.displayBuffer();
 }
 
@@ -634,12 +636,12 @@ static bool loadSleepFrameBuffer() {
 }
 
 // Enter deep sleep mode
-void enterDeepSleep(bool fromTimeout, bool preserveLastSleepFromReader) {
+void enterDeepSleep(bool fromTimeout, bool isPowerButtonRefresh) {
   HalPowerManager::Lock powerLock;  // Ensure we are at normal CPU frequency for sleep preparation
   // Skipped when called before any activity is pushed (the TRMNL refresh-in-place
   // boot path): activityManager.isReaderActivity() would report false regardless of
   // what was actually open before this wake, corrupting the reader-resume flag.
-  if (!preserveLastSleepFromReader) {
+  if (!isPowerButtonRefresh) {
     APP_STATE.lastSleepFromReader = activityManager.isReaderActivity();
   }
 
@@ -654,7 +656,7 @@ void enterDeepSleep(bool fromTimeout, bool preserveLastSleepFromReader) {
   // Commit to sleeping before goToSleep() runs the outgoing activity's onExit():
   // a WiFi activity would otherwise silentRestart() here and reboot instead.
   deepSleepInProgress = true;
-  activityManager.goToSleep(fromTimeout);
+  activityManager.goToSleep(fromTimeout, isPowerButtonRefresh);
 
   if (isQuickResumeSleep) {
     saveSleepFrameBuffer();
@@ -915,10 +917,11 @@ void setup() {
     LOG_INF("BOOT", "Power-button short press with TRMNL sleep screen active: refreshing in place");
     setupDisplayAndFonts(/*seamless=*/true);
     showTrmnlRefreshingStatus();
-    // preserveLastSleepFromReader=true: no activity is pushed yet, so
-    // activityManager.isReaderActivity() would wrongly report false and clobber
-    // whatever this flag was already set to before this wake.
-    enterDeepSleep(/*fromTimeout=*/false, /*preserveLastSleepFromReader=*/true);
+    // isPowerButtonRefresh=true: preserves lastSleepFromReader (no activity is pushed
+    // yet, so activityManager.isReaderActivity() would wrongly report false and
+    // clobber it) and tells SleepActivity to show "Refreshing" instead of "Going to
+    // sleep".
+    enterDeepSleep(/*fromTimeout=*/false, /*isPowerButtonRefresh=*/true);
     // enterDeepSleep() never returns on real hardware (esp_deep_sleep_start()).
     return;
   }
