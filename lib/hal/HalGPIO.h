@@ -80,6 +80,13 @@ class HalGPIO {
   // Should only be called when wakeup reason is PowerButton.
   void verifyPowerButtonWakeup(uint16_t requiredDurationMs, bool shortPressAllowed);
 
+  // Measures the power-button press that caused a PowerButton wakeup and reports
+  // whether it was short (released before longPressDurationMs) or long. Unlike
+  // verifyPowerButtonWakeup, this never rejects the wakeup -- the caller decides
+  // what a short vs. long press means. Should only be called when wakeup reason
+  // is PowerButton.
+  bool measurePowerButtonPressWasShort(uint16_t longPressDurationMs);
+
   // Check if USB is connected
   bool isUsbConnected() const;
 

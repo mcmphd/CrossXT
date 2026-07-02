@@ -441,6 +441,15 @@ void waitForPowerRelease() {
   }
 }
 
+// Status screen shown while a short power-button press refreshes the TRMNL sleep
+// screen in place, in lieu of the normal "BOOTING" splash (which this path skips).
+void showTrmnlRefreshingStatus() {
+  const auto pageHeight = renderer.getScreenHeight();
+  renderer.clearScreen();
+  renderer.drawCenteredText(SMALL_FONT_ID, pageHeight / 2, tr(STR_REFRESHING));
+  renderer.displayBuffer();
+}
+
 bool isGlobalPowerButtonAction(const CrossPointSettings::SHORT_PWRBTN action) {
   return isPowerButtonActionAvailableOutsideReader(action);
 }
@@ -625,9 +634,14 @@ static bool loadSleepFrameBuffer() {
 }
 
 // Enter deep sleep mode
-void enterDeepSleep(bool fromTimeout) {
+void enterDeepSleep(bool fromTimeout, bool preserveLastSleepFromReader) {
   HalPowerManager::Lock powerLock;  // Ensure we are at normal CPU frequency for sleep preparation
-  APP_STATE.lastSleepFromReader = activityManager.isReaderActivity();
+  // Skipped when called before any activity is pushed (the TRMNL refresh-in-place
+  // boot path): activityManager.isReaderActivity() would report false regardless of
+  // what was actually open before this wake, corrupting the reader-resume flag.
+  if (!preserveLastSleepFromReader) {
+    APP_STATE.lastSleepFromReader = activityManager.isReaderActivity();
+  }
 
   const bool isQuickResumeSleep =
       SETTINGS.sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::QUICK_RESUME ||
@@ -832,13 +846,31 @@ void setup() {
   // have to hold the power button across all of the SD reads below.
   const auto wakeupReason = gpio.getWakeupReason();
   LOG_INF("BOOT", "Wake route: %s", wakeupRouteName(wakeupReason));
+  // Set when a PowerButton wake is a short press with the TRMNL sleep screen active:
+  // routes to a refresh-in-place instead of a normal boot, below. Always false in the
+  // simulator, which can't measure press duration during its synthetic wake (see
+  // HalGPIO::measurePowerButtonPressWasShort's lib/hal/HalGPIO.h comment).
+  bool powerButtonWakeIsTrmnlRefresh = false;
   switch (wakeupReason) {
-    case HalGPIO::WakeupReason::PowerButton:
+    case HalGPIO::WakeupReason::PowerButton: {
+      const bool trmnlSleepScreenActive = SETTINGS.sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::TRMNL;
+      const bool shortPressAllowed =
+          trmnlSleepScreenActive || SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::SLEEP;
       LOG_INF("BOOT", "Power-button wake: verifying duration required=%u shortAllowed=%d",
-              SETTINGS.getPowerButtonWakeDuration(), SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::SLEEP);
-      gpio.verifyPowerButtonWakeup(SETTINGS.getPowerButtonWakeDuration(),
-                                   SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::SLEEP);
+              SETTINGS.getPowerButtonWakeDuration(), shortPressAllowed);
+      gpio.verifyPowerButtonWakeup(SETTINGS.getPowerButtonWakeDuration(), shortPressAllowed);
+#ifndef SIMULATOR
+      // The external simulator library (lib_deps in platformio.ini) doesn't implement
+      // measurePowerButtonPressWasShort -- the simulator's synthetic wake path can't
+      // measure press duration at all (see docs/simulator.md and HalGPIO.h). Real
+      // hardware measures it here to decide refresh-in-place vs. a normal wake.
+      if (trmnlSleepScreenActive) {
+        powerButtonWakeIsTrmnlRefresh =
+            gpio.measurePowerButtonPressWasShort(SETTINGS.getPowerButtonLongPressDuration());
+      }
+#endif
       break;
+    }
     case HalGPIO::WakeupReason::AfterUSBPower:
       // TEMP: continue booting while diagnosing post-flash/reset behavior.
       // Normal behavior is to go back to sleep when USB power causes a cold boot.
@@ -871,6 +903,21 @@ void setup() {
       recoveryFirmwareMode = true;
       LOG_INF("MAIN", "Recovery firmware mode (UP + POWER held at boot)");
     }
+  }
+
+  // Short power-button press with the TRMNL sleep screen active: refresh the TRMNL
+  // image and go straight back to sleep, without booting into Home/Reader. Recovery
+  // mode (UP + POWER) takes priority if both were somehow detected.
+  if (powerButtonWakeIsTrmnlRefresh && !recoveryFirmwareMode) {
+    LOG_INF("BOOT", "Power-button short press with TRMNL sleep screen active: refreshing in place");
+    setupDisplayAndFonts(/*seamless=*/true);
+    showTrmnlRefreshingStatus();
+    // preserveLastSleepFromReader=true: no activity is pushed yet, so
+    // activityManager.isReaderActivity() would wrongly report false and clobber
+    // whatever this flag was already set to before this wake.
+    enterDeepSleep(/*fromTimeout=*/false, /*preserveLastSleepFromReader=*/true);
+    // enterDeepSleep() never returns on real hardware (esp_deep_sleep_start()).
+    return;
   }
 
   // First serial output only here to avoid timing inconsistencies for power button press duration verification
