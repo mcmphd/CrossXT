@@ -885,6 +885,14 @@ void setup() {
       // measurePowerButtonPressWasShort -- the simulator's synthetic wake path can't
       // measure press duration at all (see docs/simulator.md and HalGPIO.h). Real
       // hardware measures it here to decide refresh-in-place vs. a normal wake.
+      //
+      // This is a SEPARATE measurement from the one verifyPowerButtonWakeup() may have
+      // just done above (it didn't, here, since shortPressAllowed was true for this
+      // case) -- and deliberately uses a different threshold. That call, when it runs,
+      // uses the WAKE duration purely as a noise filter (any qualifying press
+      // continues booting). This one uses the LONG-PRESS duration to classify intent:
+      // under it means "treat as a short action" (refresh in place); at or over it
+      // means "treat as a long press" (fall through to a normal wake, below).
       if (trmnlSleepScreenActive) {
         powerButtonWakeIsTrmnlRefresh =
             gpio.measurePowerButtonPressWasShort(SETTINGS.getPowerButtonLongPressDuration());
