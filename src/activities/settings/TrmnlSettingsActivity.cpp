@@ -11,9 +11,10 @@
 #include "components/UITheme.h"
 
 namespace {
-constexpr int MENU_ITEMS = 4;
+constexpr int MENU_ITEMS = 5;
 const StrId menuNames[MENU_ITEMS] = {StrId::STR_TRMNL_SERVER_URL, StrId::STR_TRMNL_API_KEY,
-                                     StrId::STR_TRMNL_DEVICE_ID, StrId::STR_TRMNL_ORIENTATION};
+                                     StrId::STR_TRMNL_DEVICE_ID, StrId::STR_TRMNL_ORIENTATION,
+                                     StrId::STR_TRMNL_REFRESH_ON_POWER_BUTTON};
 
 void copySetting(char* dest, const size_t destSize, const std::string& value) {
   strncpy(dest, value.c_str(), destSize - 1);
@@ -92,6 +93,10 @@ void TrmnlSettingsActivity::handleSelection() {
     SETTINGS.trmnlOrientation = (SETTINGS.trmnlOrientation + 1) % CrossPointSettings::TRMNL_ORIENTATION_COUNT;
     SETTINGS.saveToFile();
     requestUpdate();
+  } else if (selectedIndex == 4) {
+    SETTINGS.trmnlRefreshOnPowerButton = !SETTINGS.trmnlRefreshOnPowerButton;
+    SETTINGS.saveToFile();
+    requestUpdate();
   }
 }
 
@@ -113,6 +118,9 @@ void TrmnlSettingsActivity::render(RenderLock&&) {
         if (index == 3) {
           return SETTINGS.trmnlOrientation == CrossPointSettings::TRMNL_PORTRAIT ? std::string(tr(STR_TRMNL_VERTICAL))
                                                                                  : std::string(tr(STR_TRMNL_HORIZONTAL));
+        }
+        if (index == 4) {
+          return SETTINGS.trmnlRefreshOnPowerButton ? std::string(tr(STR_STATE_ON)) : std::string(tr(STR_STATE_OFF));
         }
         return std::string(tr(STR_NOT_SET));
       },

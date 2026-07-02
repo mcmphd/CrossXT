@@ -599,6 +599,8 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
     add(SettingInfo::Enum(StrId::STR_TRMNL_ORIENTATION, &CrossPointSettings::trmnlOrientation,
                           {StrId::STR_TRMNL_HORIZONTAL, StrId::STR_TRMNL_VERTICAL}, "trmnlOrientation",
                           StrId::STR_TRMNL_SETTINGS));
+    add(SettingInfo::Toggle(StrId::STR_TRMNL_REFRESH_ON_POWER_BUTTON, &CrossPointSettings::trmnlRefreshOnPowerButton,
+                            "trmnlRefreshOnPowerButton", StrId::STR_TRMNL_SETTINGS));
 
     // --- KOReader Sync (web-only, uses KOReaderCredentialStore) ---
     add(SettingInfo::DynamicString(

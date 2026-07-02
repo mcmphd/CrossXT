@@ -393,6 +393,10 @@ class CrossPointSettings {
   char trmnlApiKey[128] = "";
   char trmnlDeviceId[32] = "";
   uint8_t trmnlOrientation = TRMNL_LANDSCAPE;
+  // Short-pressing the power button while asleep with the TRMNL sleep screen
+  // active refreshes it in place instead of the default wake behavior. Off by
+  // default -- opt in per-device.
+  uint8_t trmnlRefreshOnPowerButton = 0;
   // Hide battery percentage
   uint8_t hideBatteryPercentage = HIDE_NEVER;
   // Long-press page turn button behavior

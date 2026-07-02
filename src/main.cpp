@@ -846,14 +846,17 @@ void setup() {
   // have to hold the power button across all of the SD reads below.
   const auto wakeupReason = gpio.getWakeupReason();
   LOG_INF("BOOT", "Wake route: %s", wakeupRouteName(wakeupReason));
-  // Set when a PowerButton wake is a short press with the TRMNL sleep screen active:
-  // routes to a refresh-in-place instead of a normal boot, below. Always false in the
-  // simulator, which can't measure press duration during its synthetic wake (see
-  // HalGPIO::measurePowerButtonPressWasShort's lib/hal/HalGPIO.h comment).
+  // Set when a PowerButton wake is a short press with the TRMNL sleep screen active
+  // and SETTINGS.trmnlRefreshOnPowerButton is on (Settings > System > TRMNL Settings
+  // > Refresh on Power Button, off by default): routes to a refresh-in-place instead
+  // of a normal boot, below. Always false in the simulator, which can't measure press
+  // duration during its synthetic wake (see HalGPIO::measurePowerButtonPressWasShort's
+  // lib/hal/HalGPIO.h comment).
   bool powerButtonWakeIsTrmnlRefresh = false;
   switch (wakeupReason) {
     case HalGPIO::WakeupReason::PowerButton: {
-      const bool trmnlSleepScreenActive = SETTINGS.sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::TRMNL;
+      const bool trmnlSleepScreenActive = SETTINGS.sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::TRMNL &&
+                                          SETTINGS.trmnlRefreshOnPowerButton != 0;
       const bool shortPressAllowed =
           trmnlSleepScreenActive || SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::SLEEP;
       LOG_INF("BOOT", "Power-button wake: verifying duration required=%u shortAllowed=%d",
