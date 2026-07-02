@@ -447,6 +447,23 @@ void showTrmnlRefreshingStatus() {
   const auto pageHeight = renderer.getScreenHeight();
   const auto lineHeight = renderer.getTextHeight(SMALL_FONT_ID);
   renderer.clearScreen();
+
+  // Up-pointing arrow toward the top-left corner, where the physical power button is
+  // on this device -- a chevron head (stacked widening lines, same technique as
+  // BaseTheme's list scroll arrows) plus a shaft, positioned in the top-left margin.
+  constexpr int arrowMarginLeft = 40;
+  constexpr int arrowMarginTop = 24;
+  constexpr int arrowHeadSize = 8;
+  constexpr int arrowShaftLength = 20;
+  const int arrowX = arrowMarginLeft;
+  for (int i = 0; i < arrowHeadSize; ++i) {
+    const int lineWidth = 1 + i * 2;
+    const int startX = arrowX - i;
+    renderer.drawLine(startX, arrowMarginTop + i, startX + lineWidth - 1, arrowMarginTop + i);
+  }
+  renderer.drawLine(arrowX, arrowMarginTop + arrowHeadSize, arrowX, arrowMarginTop + arrowHeadSize + arrowShaftLength,
+                    2, true);
+
   renderer.drawCenteredText(SMALL_FONT_ID, pageHeight / 2 - lineHeight / 2, tr(STR_TRMNL_REFRESH_HINT_1));
   renderer.drawCenteredText(SMALL_FONT_ID, pageHeight / 2 + lineHeight / 2, tr(STR_TRMNL_REFRESH_HINT_2));
   renderer.displayBuffer();
