@@ -26,6 +26,7 @@ constexpr uint16_t HTTP_RESPONSE_TIMEOUT_MS = 15000;
 constexpr int32_t HTTP_CONNECT_TIMEOUT_MS = 10000;
 constexpr uint32_t HTTPS_HANDSHAKE_TIMEOUT_SECONDS = 10;
 constexpr uint32_t DOWNLOAD_IDLE_TIMEOUT_MS = 30000;
+constexpr int MAX_HTTP_REDIRECTS = 5;
 
 void logNetworkState(const char* phase) {
   LOG_DBG("HTTP", "%s: heap free=%u maxAlloc=%u wifi=%d rssi=%d", phase, ESP.getFreeHeap(), ESP.getMaxAllocHeap(),
@@ -57,6 +58,120 @@ void addHeaders(HTTPClient& http, const HttpDownloader::Header* headers, const s
       http.addHeader(headers[i].name, headers[i].value);
     }
   }
+}
+
+std::unique_ptr<NetworkClient> makeClientForUrl(const std::string& url) {
+  if (UrlUtils::isHttpsUrl(url)) {
+    auto* secureClient = new (std::nothrow) NetworkClientSecure();
+    if (!secureClient) {
+      LOG_ERR("HTTP", "Failed to allocate secure client");
+      return nullptr;
+    }
+    secureClient->setHandshakeTimeout(HTTPS_HANDSHAKE_TIMEOUT_SECONDS);
+    secureClient->setInsecure();
+    return std::unique_ptr<NetworkClient>(secureClient);
+  }
+  auto* plainClient = new (std::nothrow) NetworkClient();
+  if (!plainClient) {
+    LOG_ERR("HTTP", "Failed to allocate client");
+    return nullptr;
+  }
+  return std::unique_ptr<NetworkClient>(plainClient);
+}
+
+#ifndef SIMULATOR
+// HTTPClient::begin(Client&, url) binds the request to a fixed transport (plain vs.
+// TLS) chosen once, before the request, from the URL's scheme. HTTPClient's own
+// follow-redirects (setFollowRedirects below) can chase same-scheme redirects by
+// reusing that transport, but it cannot silently upgrade a plain NetworkClient to a
+// TLS NetworkClientSecure mid-request -- so a cross-scheme redirect (e.g. a
+// configured http:// URL that the server 308s to https://) comes back to us here as
+// an unfollowed 3xx rather than a followed 200. #ifndef SIMULATOR: the simulator's
+// HTTPClient/SimHttpFetch shim shells out to `curl -L`, which already follows
+// redirects (including cross-scheme) transparently before returning a status code,
+// and its mock HTTPClient has no collectHeaders()/header() support since it has
+// never needed to inspect a Location header itself -- there is nothing for this
+// codepath to do there.
+bool isRedirectStatus(const int httpCode) {
+  switch (httpCode) {
+    case 301:  // Moved Permanently
+    case 302:  // Found
+    case 303:  // See Other
+    case 307:  // Temporary Redirect
+    case 308:  // Permanent Redirect
+      return true;
+    default:
+      return false;
+  }
+}
+#endif
+
+struct HttpConnection {
+  std::unique_ptr<NetworkClient> client;
+  std::unique_ptr<HTTPClient> http;
+  int httpCode = 0;
+};
+
+// Connects to `url`, applying `username`/`password`/`headers` (and, if non-null,
+// `rangeHeader` for resumable downloads) to each attempt, and retries against the
+// Location target on any redirect status HTTPClient couldn't resolve itself (see
+// isRedirectStatus above). Returns an HttpConnection with a null `http` on
+// unrecoverable failure (allocation failure, too many redirects, or a redirect
+// response with no usable Location header) -- callers should treat that the same
+// as any other failed request.
+HttpConnection connectFollowingRedirects(std::string url, const std::string& username, const std::string& password,
+                                         const HttpDownloader::Header* headers, const size_t headerCount,
+                                         const char* rangeHeader) {
+  for (int redirectCount = 0; redirectCount <= MAX_HTTP_REDIRECTS; ++redirectCount) {
+    auto client = makeClientForUrl(url);
+    if (!client) {
+      return {};
+    }
+    auto http = std::make_unique<HTTPClient>();
+
+    LOG_DBG("HTTP", "Connecting: %s", url.c_str());
+
+    http->begin(*client, url.c_str());
+    http->setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+    http->setReuse(false);
+    http->setConnectTimeout(HTTP_CONNECT_TIMEOUT_MS);
+    http->setTimeout(HTTP_RESPONSE_TIMEOUT_MS);
+    http->addHeader("User-Agent", "CrossInk-ESP32-" CROSSINK_VERSION);
+    addHeaders(*http, headers, headerCount);
+    if (rangeHeader) {
+      http->addHeader("Range", rangeHeader);
+    }
+    if (!username.empty() && !password.empty()) {
+      std::string credentials = username + ":" + password;
+      String encoded = base64::encode(credentials.c_str());
+      http->addHeader("Authorization", "Basic " + encoded);
+    }
+
+#ifndef SIMULATOR
+    const char* redirectHeaderKeys[] = {"Location"};
+    http->collectHeaders(redirectHeaderKeys, 1);
+#endif
+
+    const int httpCode = http->GET();
+
+#ifndef SIMULATOR
+    if (isRedirectStatus(httpCode)) {
+      const String location = http->header("Location");
+      http->end();
+      if (location.isEmpty()) {
+        LOG_ERR("HTTP", "Request failed: %d (redirect with no Location header)", httpCode);
+        return {};
+      }
+      LOG_INF("HTTP", "Following redirect (%d) to %s", httpCode, location.c_str());
+      url = location.c_str();
+      continue;
+    }
+#endif
+
+    return HttpConnection{std::move(client), std::move(http), httpCode};
+  }
+  LOG_ERR("HTTP", "Request failed: too many redirects (%d)", MAX_HTTP_REDIRECTS);
+  return {};
 }
 
 class ProgressNotifier {
@@ -247,43 +362,13 @@ bool HttpDownloader::fetchUrl(const std::string& url, Stream& outContent, const 
   WifiPowerSaveGuard wifiPowerSaveGuard;
   (void)wifiPowerSaveGuard;
 
-  std::unique_ptr<NetworkClient> client;
-  if (UrlUtils::isHttpsUrl(url)) {
-    auto* secureClient = new (std::nothrow) NetworkClientSecure();
-    if (!secureClient) {
-      LOG_ERR("HTTP", "Failed to allocate secure client");
-      return false;
-    }
-    secureClient->setHandshakeTimeout(HTTPS_HANDSHAKE_TIMEOUT_SECONDS);
-    secureClient->setInsecure();
-    client.reset(secureClient);
-  } else {
-    auto* plainClient = new (std::nothrow) NetworkClient();
-    if (!plainClient) {
-      LOG_ERR("HTTP", "Failed to allocate client");
-      return false;
-    }
-    client.reset(plainClient);
+  auto connection = connectFollowingRedirects(url, username, password, headers, headerCount, nullptr);
+  if (!connection.http) {
+    return false;
   }
-  HTTPClient http;
+  HTTPClient& http = *connection.http;
+  const int httpCode = connection.httpCode;
 
-  LOG_DBG("HTTP", "Fetching: %s", url.c_str());
-
-  http.begin(*client, url.c_str());
-  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-  http.setReuse(false);
-  http.setConnectTimeout(HTTP_CONNECT_TIMEOUT_MS);
-  http.setTimeout(HTTP_RESPONSE_TIMEOUT_MS);
-  http.addHeader("User-Agent", "CrossInk-ESP32-" CROSSINK_VERSION);
-  addHeaders(http, headers, headerCount);
-
-  if (!username.empty() && !password.empty()) {
-    std::string credentials = username + ":" + password;
-    String encoded = base64::encode(credentials.c_str());
-    http.addHeader("Authorization", "Basic " + encoded);
-  }
-
-  const int httpCode = http.GET();
   if (httpCode != HTTP_CODE_OK) {
     LOG_ERR("HTTP", "Fetch failed: %d", httpCode);
     http.end();
@@ -330,25 +415,6 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
   WifiPowerSaveGuard wifiPowerSaveGuard;
   (void)wifiPowerSaveGuard;
 
-  std::unique_ptr<NetworkClient> client;
-  if (UrlUtils::isHttpsUrl(url)) {
-    auto* secureClient = new (std::nothrow) NetworkClientSecure();
-    if (!secureClient) {
-      LOG_ERR("HTTP", "Failed to allocate secure client");
-      return HTTP_ERROR;
-    }
-    secureClient->setHandshakeTimeout(HTTPS_HANDSHAKE_TIMEOUT_SECONDS);
-    secureClient->setInsecure();
-    client.reset(secureClient);
-  } else {
-    auto* plainClient = new (std::nothrow) NetworkClient();
-    if (!plainClient) {
-      LOG_ERR("HTTP", "Failed to allocate client");
-      return HTTP_ERROR;
-    }
-    client.reset(plainClient);
-  }
-  HTTPClient http;
   const size_t bufferSize = options.bufferSize > 0 ? options.bufferSize : DEFAULT_DOWNLOAD_BUFFER_SIZE;
 
   LOG_DBG("HTTP", "Downloading: %s", url.c_str());
@@ -356,14 +422,6 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
   LOG_DBG("HTTP", "Timeouts: connect=%ld ms response=%u ms idle=%lu ms buffer=%zu bytes",
           static_cast<long>(HTTP_CONNECT_TIMEOUT_MS), HTTP_RESPONSE_TIMEOUT_MS,
           static_cast<unsigned long>(DOWNLOAD_IDLE_TIMEOUT_MS), bufferSize);
-
-  http.begin(*client, url.c_str());
-  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-  http.setReuse(false);
-  http.setConnectTimeout(HTTP_CONNECT_TIMEOUT_MS);
-  http.setTimeout(HTTP_RESPONSE_TIMEOUT_MS);
-  http.addHeader("User-Agent", "CrossInk-ESP32-" CROSSINK_VERSION);
-  addHeaders(http, headers, headerCount);
 
   size_t resumeOffset = 0;
   if (options.resumePartial && Storage.exists(destPath.c_str())) {
@@ -373,20 +431,19 @@ HttpDownloader::DownloadError HttpDownloader::downloadToFile(const std::string& 
       existingFile.close();
     }
   }
+  char rangeHeader[40] = {};
   if (resumeOffset > 0) {
-    char rangeHeader[40];
     snprintf(rangeHeader, sizeof(rangeHeader), "bytes=%zu-", resumeOffset);
-    http.addHeader("Range", rangeHeader);
     LOG_DBG("HTTP", "Resuming download at byte %zu", resumeOffset);
   }
 
-  if (!username.empty() && !password.empty()) {
-    std::string credentials = username + ":" + password;
-    String encoded = base64::encode(credentials.c_str());
-    http.addHeader("Authorization", "Basic " + encoded);
+  auto connection = connectFollowingRedirects(url, username, password, headers, headerCount,
+                                              resumeOffset > 0 ? rangeHeader : nullptr);
+  if (!connection.http) {
+    return HTTP_ERROR;
   }
-
-  const int httpCode = http.GET();
+  HTTPClient& http = *connection.http;
+  const int httpCode = connection.httpCode;
   const bool isResumeResponse = resumeOffset > 0 && httpCode == 206;
   if (httpCode != HTTP_CODE_OK && !isResumeResponse) {
     if (httpCode < 0) {
